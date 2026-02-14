@@ -1,0 +1,1514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stripe Payout Categorizer</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e8eef5 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            display: flex;
+            min-height: 100vh;
+            gap: 0;
+        }
+
+        .sidebar {
+            width: 320px;
+            background: white;
+            padding: 40px 24px;
+            box-shadow: 2px 0 8px rgba(0,0,0,0.08);
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            overflow-y: auto;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 40px;
+            max-width: 1000px;
+        }
+
+        h1 {
+            color: #1a1a1a;
+            font-size: 24px;
+            font-weight: 300;
+            letter-spacing: -0.5px;
+            margin-bottom: 4px;
+            margin-top: 0;
+            border: none;
+        }
+
+        h1::before {
+            content: "♪ ";
+            color: #5a7a9a;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 32px;
+            font-weight: 400;
+        }
+
+        .upload-section {
+            margin-bottom: 32px;
+        }
+
+        .upload-section h2 {
+            font-size: 16px;
+            font-weight: 500;
+            color: #333;
+            margin-top: 0;
+            margin-bottom: 16px;
+        }
+
+        .main-content h2 {
+            font-size: 28px;
+            font-weight: 300;
+            color: #1a1a1a;
+            margin-top: 0;
+            margin-bottom: 24px;
+        }
+
+        .file-input-group {
+            margin-bottom: 20px;
+        }
+
+        .file-input-group label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 12px;
+            color: #444;
+            font-size: 15px;
+        }
+
+        .file-input-group input[type="file"] {
+            display: none;
+        }
+
+        .file-drop-zone {
+            border: 2px dashed #c5d3e0;
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: background 0.3s ease, border-color 0.3s ease;
+            background: #f8fafc;
+            position: relative;
+            min-height: 88px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .file-drop-zone.has-files {
+            background: #e8f5e9;
+            border: 2px solid #c8e6c9;
+            cursor: default;
+        }
+
+        .file-drop-zone:not(.has-files):hover {
+            border-color: #5a7a9a;
+            background: #f0f4f8;
+        }
+
+        .file-drop-zone .drop-icon {
+            font-size: 24px;
+            margin-right: 12px;
+        }
+
+        .file-drop-zone .drop-text {
+            font-size: 14px;
+            color: #333;
+            font-weight: 500;
+            margin-bottom: 6px;
+        }
+
+        .file-drop-zone .drop-hint {
+            font-size: 12px;
+            color: #666;
+            line-height: 1.4;
+        }
+
+        .status {
+            padding: 10px;
+            margin-top: 12px;
+            border-radius: 6px;
+            display: none;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .status.success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #c8e6c9;
+            display: block;
+        }
+
+        .status.error {
+            background-color: #ffebee;
+            color: #c62828;
+            border: 1px solid #ffcdd2;
+            display: block;
+        }
+
+        .payout-section {
+            display: block;
+        }
+
+        .payout-select:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .payout-section h2 {
+            font-size: 16px;
+            font-weight: 500;
+            color: #333;
+            margin-top: 0;
+            margin-bottom: 16px;
+        }
+
+        .payout-select {
+            width: 100%;
+            padding: 10px 12px;
+            font-size: 13px;
+            border: 2px solid #e0e6ed;
+            border-radius: 6px;
+            background: white;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        .payout-select:hover {
+            border-color: #5a7a9a;
+        }
+
+        .payout-select:focus {
+            outline: none;
+            border-color: #5a7a9a;
+            box-shadow: 0 0 0 3px rgba(90, 122, 154, 0.1);
+        }
+
+        .breakdown {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.07), 0 1px 3px rgba(0,0,0,0.06);
+        }
+
+        .breakdown h3 {
+            margin-top: 0;
+            color: #1a1a1a;
+            font-size: 24px;
+            font-weight: 400;
+            border-bottom: 2px solid #5a7a9a;
+            padding-bottom: 12px;
+        }
+
+        /* Reusable section style for breakdown sections */
+        .breakdown-section {
+            border: 2px solid #e8eef5;
+            border-radius: 8px;
+            padding: 24px;
+            margin-top: 24px;
+        }
+
+        .breakdown-section-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #5a7a9a;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 16px;
+        }
+
+        .category-line {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #ddd;
+            font-size: 16px;
+        }
+
+        .category-line:last-child {
+            border-bottom: none;
+        }
+
+        .category-line.total {
+            font-weight: bold;
+            font-size: 18px;
+            border-top: 2px solid #333;
+            margin-top: 10px;
+            padding-top: 10px;
+        }
+
+        .category-name {
+            color: #555;
+        }
+
+        .category-amount {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .donations-list {
+            margin-top: 30px;
+        }
+
+        .donations-list h4 {
+            color: #1a1a1a;
+            font-size: 18px;
+            font-weight: 500;
+            border-bottom: 2px solid #5a7a9a;
+            padding-bottom: 10px;
+            margin-bottom: 16px;
+        }
+
+        .donation-item {
+            background: white;
+            padding: 16px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            border-left: 4px solid #5a7a9a;
+            display: grid;
+            grid-template-columns: 100px 1fr 200px;
+            gap: 15px;
+            align-items: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            transition: all 0.2s ease;
+        }
+
+        .donation-item:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transform: translateY(-1px);
+        }
+
+        .donation-amount {
+            font-weight: 600;
+            color: #5a7a9a;
+            font-size: 17px;
+        }
+
+        .donation-details {
+            color: #555;
+        }
+
+        .donation-date {
+            color: #888;
+            font-size: 14px;
+        }
+
+        .validation {
+            margin-top: 24px;
+            padding: 16px 20px;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 15px;
+        }
+
+        .validation.valid {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #c8e6c9;
+        }
+
+        .validation.invalid {
+            background-color: #ffebee;
+            color: #c62828;
+            border: 1px solid #ffcdd2;
+        }
+
+        .copy-button {
+            background: linear-gradient(135deg, #5a7a9a 0%, #4a6a8a 100%);
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            font-size: 16px;
+            font-weight: 500;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 24px;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 4px rgba(90, 122, 154, 0.3);
+        }
+
+        .copy-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(90, 122, 154, 0.4);
+        }
+
+        .copy-button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(90, 122, 154, 0.3);
+        }
+
+        .copy-notification {
+            display: none;
+            background: linear-gradient(135deg, #5a7a9a 0%, #4a6a8a 100%);
+            color: white;
+            padding: 14px 24px;
+            border-radius: 8px;
+            margin-top: 12px;
+            font-weight: 500;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(90, 122, 154, 0.4);
+        }
+
+        .copy-notification.show {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .info-icon {
+            position: absolute;
+            top: 40px;
+            right: 24px;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #5a7a9a 0%, #4a6a8a 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(90, 122, 154, 0.4);
+            transition: all 0.2s ease;
+            z-index: 100;
+        }
+
+        .info-icon:hover {
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(90, 122, 154, 0.6);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            max-width: 700px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            position: relative;
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            font-size: 32px;
+            font-weight: 300;
+            color: #999;
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            color: #333;
+        }
+
+        .modal-content h2 {
+            margin-top: 0;
+            color: #1a1a1a;
+            font-size: 28px;
+            font-weight: 400;
+            margin-bottom: 24px;
+        }
+
+        .modal-content h3 {
+            color: #333;
+            font-size: 20px;
+            font-weight: 500;
+            margin-top: 28px;
+            margin-bottom: 12px;
+            border-bottom: 2px solid #5a7a9a;
+            padding-bottom: 8px;
+        }
+
+        .modal-content p {
+            color: #555;
+            line-height: 1.7;
+            margin-bottom: 16px;
+        }
+
+        .modal-content ol, .modal-content ul {
+            color: #555;
+            line-height: 1.7;
+            margin-bottom: 16px;
+        }
+
+        .modal-content li {
+            margin-bottom: 8px;
+        }
+
+        .modal-content strong {
+            color: #333;
+        }
+
+        .modal-content code {
+            background: #f5f7fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="info-icon" onclick="showModal()">ℹ</div>
+            <h1>Concord Orchestra</h1>
+            <div class="subtitle">Stripe Payout Categorizer</div>
+
+            <div style="padding: 16px; background: #e8f5e9; border-radius: 8px; margin-bottom: 24px; border-left: 4px solid #5a7a9a;">
+                <div style="font-size: 13px; line-height: 1.6; color: #333;">
+                    <strong style="color: #1a1a1a;">Quick Start:</strong> Export data from both Stripe and ThunderTix for the <strong>same time period</strong>, then upload both files below to categorize your payouts.
+                </div>
+            </div>
+
+            <div class="upload-section">
+                <h2><span style="display: inline-block; width: 24px; height: 24px; background: #5a7a9a; color: white; border-radius: 50%; text-align: center; line-height: 24px; font-size: 14px; margin-right: 8px;">1</span>Export Files</h2>
+                <div style="margin-bottom: 16px; font-size: 13px; color: #555; line-height: 1.5;">
+                    Export transaction data for the same date range from both systems:
+                </div>
+                <div style="margin-bottom: 16px; padding: 12px; background: #f8fafc; border-radius: 6px; border-left: 3px solid #5a7a9a;">
+                    <div style="font-size: 13px; line-height: 1.8;">
+                        <div style="margin-bottom: 8px;">
+                            <a href="https://dashboard.stripe.com/balance/all-activity" target="_blank" style="color: #5a7a9a; text-decoration: underline; font-weight: 500;">
+                                📊 Stripe All Activity →
+                            </a>
+                            <div style="font-size: 11px; color: #666; margin-top: 2px; padding-left: 20px;">
+                                Export as <code style="background: #e8eef5; padding: 1px 4px; border-radius: 3px;">balance_history.csv</code>
+                            </div>
+                        </div>
+                        <div>
+                            <a href="https://admin.thundertix.com/all_orders" target="_blank" style="color: #5a7a9a; text-decoration: underline; font-weight: 500;">
+                                🎫 ThunderTix Orders →
+                            </a>
+                            <div style="font-size: 11px; color: #666; margin-top: 2px; padding-left: 20px;">
+                                Export as <code style="background: #e8eef5; padding: 1px 4px; border-radius: 3px;">orders_export.csv</code>
+                                <br><span style="color: #c62828; font-weight: 500;">✓ Check "Email" before export</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="upload-section">
+                <h2><span style="display: inline-block; width: 24px; height: 24px; background: #5a7a9a; color: white; border-radius: 50%; text-align: center; line-height: 24px; font-size: 14px; margin-right: 8px;">2</span>Upload Files</h2>
+                <div style="margin-bottom: 12px; font-size: 13px; color: #555;">
+                    Drop both exported CSV files here:
+                </div>
+                <div class="file-input-group">
+                    <input type="file" id="csv-files" accept=".csv" multiple>
+                    <label for="csv-files">
+                        <div class="file-drop-zone" id="drop-zone-display">
+                            <div style="display: flex; align-items: center; width: 100%;">
+                                <div class="drop-icon">📁</div>
+                                <div style="flex: 1; text-align: left;">
+                                    <div style="font-size: 14px; font-weight: 500; color: #333; margin-bottom: 2px;">Drop both files here</div>
+                                    <div style="font-size: 12px; color: #666;">or click to browse</div>
+                                </div>
+                            </div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <div id="payout-section" class="payout-section">
+                <h2><span style="display: inline-block; width: 24px; height: 24px; background: #5a7a9a; color: white; border-radius: 50%; text-align: center; line-height: 24px; font-size: 14px; margin-right: 8px;">3</span>Select Payout</h2>
+                <select id="payout-select" class="payout-select" disabled>
+                    <option value="">Upload files first...</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div id="breakdown-container"></div>
+        </div>
+    </div>
+
+    <div id="info-modal" class="modal" onclick="hideModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <span class="modal-close" onclick="hideModal()">&times;</span>
+            <h2>♪ How to Use This Tool</h2>
+
+            <h3>What This Tool Does</h3>
+            <p>
+                This tool helps the Concord Orchestra treasurer categorize bank deposits from Stripe into
+                QuickBooks categories. When Stripe processes ticket sales and donations through ThunderTix,
+                it periodically sends a <strong>payout</strong> to our bank account. This tool breaks down
+                each payout into the accounting categories you need for QuickBooks entry.
+            </p>
+
+            <h3>Understanding the Process</h3>
+            <p>
+                <strong>1. ThunderTix:</strong> When someone buys tickets or makes a donation, ThunderTix
+                records the order with details about ticket quantity, surcharges, and donations.
+            </p>
+            <p>
+                <strong>2. Stripe:</strong> Stripe processes the payment and takes a small fee. It doesn't
+                immediately send money to our bank—instead, it accumulates transactions over several days.
+            </p>
+            <p>
+                <strong>3. Payout:</strong> Every week or so, Stripe bundles all recent transactions and
+                sends one lump sum to our bank. This is what shows up in QuickBooks and needs to be categorized.
+            </p>
+
+            <h3>How to Export the Data</h3>
+            <p><strong>From Stripe:</strong></p>
+            <ol>
+                <li>Log into the Stripe dashboard</li>
+                <li>Go to <strong>Balance → Balance History</strong></li>
+                <li>Export the CSV (this is your <code>balance_history.csv</code>)</li>
+            </ol>
+
+            <p><strong>From ThunderTix:</strong></p>
+            <ol>
+                <li>Log into ThunderTix</li>
+                <li>Go to <strong>Reports → Orders Export</strong></li>
+                <li><strong>IMPORTANT:</strong> Check the <strong>"Email"</strong> checkbox before exporting</li>
+                <li>Export the CSV (this is your <code>orders_export.csv</code>)</li>
+            </ol>
+
+            <h3>Using the Tool</h3>
+            <ol>
+                <li>Drag both CSV files onto the upload area (or click to browse)</li>
+                <li>Select a payout from the dropdown (most recent at the top)</li>
+                <li>Review the breakdown showing:
+                    <ul>
+                        <li><strong>Ticket Sales:</strong> Base ticket prices (Order Amount - Donation - Fees)</li>
+                        <li><strong>Surcharges:</strong> Our $1/ticket service fee</li>
+                        <li><strong>Stripe Fees:</strong> What we pay to Stripe (negative amount)</li>
+                        <li><strong>Donations:</strong> Additional contributions</li>
+                    </ul>
+                </li>
+                <li>Check that the validation passes (calculated total = payout amount)</li>
+                <li>In QuickBooks, find the corresponding payout transaction in your bank account</li>
+                <li>Split the transaction into these categories using the amounts shown:
+                    <ul>
+                        <li><strong>Ticket Sales</strong></li>
+                        <li><strong>Online Ticket Surcharge</strong></li>
+                        <li><strong>Online Transaction Fees:Stripe</strong> (negative amount)</li>
+                        <li><strong>Contributions:Individual</strong></li>
+                    </ul>
+                </li>
+                <li>Click "Copy Memo" and paste into the QuickBooks transaction memo field for record-keeping</li>
+            </ol>
+
+            <p>
+                <strong>Memo Format:</strong> The copied memo includes the number of tickets and donations,
+                plus a list of all donors with their donation amounts. Example:
+                <br><code>45 tickets; 0 subscriptions; 3 donations - John Smith ($100), Jane Doe ($50), Bob Jones ($25)</code>
+            </p>
+
+            <h3>Matching Logic</h3>
+            <p>
+                The tool matches Stripe charges to ThunderTix orders using:
+            </p>
+            <ol>
+                <li><strong>Email address</strong> (most reliable)</li>
+                <li><strong>Exact amount</strong> (to the cent)</li>
+                <li><strong>Date</strong> (ThunderTix date must be same day or 1 day before Stripe)</li>
+            </ol>
+            <p>
+                Charges with email addresses are matched first to ensure the most reliable matches.
+                Charges without emails are matched afterward using only amount and date.
+            </p>
+
+            <h3>Understanding the Dates</h3>
+            <p>
+                There are two important dates in Stripe:
+            </p>
+            <ul>
+                <li><strong>Created:</strong> When the customer paid (matches ThunderTix date)</li>
+                <li><strong>Available On:</strong> When funds became available for payout</li>
+            </ul>
+            <p>
+                The tool uses "Available On" to group charges into payouts, but uses "Created" to match
+                with ThunderTix orders. This is why a charge from Dec 5 might not appear until the
+                Dec 12 payout.
+            </p>
+
+            <h3>Data Notes Section</h3>
+            <p>
+                If you see a "Data Notes" section, it shows orders where the number of tickets doesn't
+                match the surcharge amount. This is normal and can happen due to:
+            </p>
+            <ul>
+                <li>Exchanges (moving to different seats, no charge)</li>
+                <li>Group discounts or special pricing</li>
+                <li>Data entry variations at point of sale</li>
+            </ul>
+            <p>
+                The amounts are still correctly categorized—this section is just informational so you're
+                aware of these special cases.
+            </p>
+
+            <h3>Troubleshooting</h3>
+            <p><strong>Unmatched Charges:</strong> If some Stripe charges don't match ThunderTix orders, it could be:</p>
+            <ul>
+                <li>Email addresses differ between systems</li>
+                <li>Same-day transactions with identical amounts (ambiguous)</li>
+                <li>Missing ThunderTix data</li>
+            </ul>
+            <p>
+                The tool shows potential matches to help you investigate. You may need to manually verify
+                these in QuickBooks.
+            </p>
+
+            <p><strong>Validation Failed:</strong> If the calculated total doesn't match the payout:</p>
+            <ul>
+                <li>Check for unmatched charges (shown in red box)</li>
+                <li>Verify both CSV files are for the correct time period</li>
+                <li>Ensure ThunderTix export includes email addresses</li>
+            </ul>
+        </div>
+    </div>
+
+
+    <script>
+        // ============================================
+        // CONFIGURATION
+        // ============================================
+
+        // QuickBooks category names - update these if categories change
+        const CATEGORIES = {
+            ticketSales: "Ticket Sales",
+            surcharges: "Online Ticket Surcharge",
+            stripeFees: "Online Transaction Fees:Stripe",
+            donations: "Contributions:Individual"
+        };
+
+        // Matching tolerances - tuned based on real-world data
+        const MATCHING = {
+            // Allow up to 1 cent difference for floating point rounding
+            AMOUNT_TOLERANCE_CENTS: 1,
+            // Allow ThunderTix date to be same day or 1 day before Stripe date
+            // (transactions recorded late at night may not process until next day)
+            MAX_DATE_DIFF_DAYS: 1,
+            // How many potential matches to show in debug output
+            MAX_POTENTIAL_MATCHES: 3
+        };
+
+        // ============================================
+        // Global State
+        // ============================================
+        let stripeData = null;
+        let thundertixData = null;
+        let payoutsData = [];
+        let stripeFileName = '';
+        let thundertixFileName = '';
+
+        // ============================================
+        // CSV Parser
+        // ============================================
+
+        /**
+         * Parses CSV text into an array of objects.
+         * Handles quoted fields that may contain commas.
+         */
+        function parseCSV(text) {
+            const lines = text.trim().split('\n');
+            const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+
+            return lines.slice(1).map(line => {
+                const values = [];
+                let current = '';
+                let inQuotes = false;
+
+                for (let i = 0; i < line.length; i++) {
+                    const char = line[i];
+
+                    if (char === '"') {
+                        inQuotes = !inQuotes;
+                    } else if (char === ',' && !inQuotes) {
+                        values.push(current.trim().replace(/^"|"$/g, ''));
+                        current = '';
+                    } else {
+                        current += char;
+                    }
+                }
+                values.push(current.trim().replace(/^"|"$/g, ''));
+
+                const row = {};
+                headers.forEach((header, index) => {
+                    row[header] = values[index] || '';
+                });
+                return row;
+            });
+        }
+
+        // ============================================
+        // File Upload Handlers
+        // ============================================
+
+        const fileInput = document.getElementById('csv-files');
+        const dropZone = document.querySelector('.file-drop-zone');
+
+        /**
+         * Processes uploaded files and validates their format.
+         * Determines file type by filename pattern.
+         */
+        async function processUploadedFiles(files) {
+            const dropZone = document.getElementById('drop-zone-display');
+
+            for (const file of files) {
+                const fileName = file.name.toLowerCase();
+                const text = await file.text();
+
+                if (fileName.includes('balance_history') || fileName.includes('balance-history')) {
+                    stripeData = parseCSV(text);
+                    stripeFileName = file.name;
+                } else if (fileName.includes('orders_export') || fileName.includes('orders-export')) {
+                    thundertixData = parseCSV(text);
+                    thundertixFileName = file.name;
+
+                    // Email column is required for reliable matching
+                    if (thundertixData.length > 0 && !thundertixData[0].hasOwnProperty('Email')) {
+                        dropZone.className = 'file-drop-zone';
+                        dropZone.innerHTML = `
+                            <div style="display: flex; align-items: center; width: 100%;">
+                                <div class="drop-icon" style="color: #c62828;">⚠</div>
+                                <div style="flex: 1; text-align: left; font-size: 13px; line-height: 1.5; color: #c62828;">
+                                    <div style="font-weight: 600; margin-bottom: 4px;">Error</div>
+                                    <div style="font-size: 12px;">ThunderTix missing Email column</div>
+                                </div>
+                            </div>
+                        `;
+                        dropZone.style.background = '#ffebee';
+                        dropZone.style.borderColor = '#ffcdd2';
+                        thundertixData = null;
+                        return;
+                    }
+                } else {
+                    dropZone.className = 'file-drop-zone';
+                    dropZone.innerHTML = `
+                        <div style="display: flex; align-items: center; width: 100%;">
+                            <div class="drop-icon" style="color: #c62828;">⚠</div>
+                            <div style="flex: 1; text-align: left; font-size: 13px; line-height: 1.5; color: #c62828;">
+                                <div style="font-weight: 600; margin-bottom: 4px;">Unknown file</div>
+                                <div style="font-size: 12px;">${file.name}</div>
+                            </div>
+                        </div>
+                    `;
+                    dropZone.style.background = '#ffebee';
+                    dropZone.style.borderColor = '#ffcdd2';
+                    return;
+                }
+            }
+
+            updateStatus();
+        }
+
+        // Handle file selection via click
+        fileInput.addEventListener('change', async (e) => {
+            await processUploadedFiles(Array.from(e.target.files));
+        });
+
+        // Handle drag and drop
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            }, false);
+        });
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.style.borderColor = '#5a7a9a';
+                dropZone.style.background = '#e8f0f8';
+            }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.style.borderColor = '#c5d3e0';
+                dropZone.style.background = '#f8fafc';
+            }, false);
+        });
+
+        dropZone.addEventListener('drop', async (e) => {
+            await processUploadedFiles(Array.from(e.dataTransfer.files));
+        }, false);
+
+        /**
+         * Updates the upload status message based on which files have been loaded.
+         */
+        function updateStatus() {
+            const dropZone = document.getElementById('drop-zone-display');
+            const bothLoaded = stripeData && thundertixData;
+
+            if (bothLoaded) {
+                // Show compact success message in drop zone
+                dropZone.className = 'file-drop-zone has-files';
+                dropZone.innerHTML = `
+                    <div style="display: flex; align-items: center; width: 100%;">
+                        <div class="drop-icon" style="color: #2e7d32;">✓</div>
+                        <div style="flex: 1; text-align: left; font-size: 13px; line-height: 1.5; color: #2e7d32;">
+                            <div style="font-weight: 600; margin-bottom: 4px;">Files loaded</div>
+                            <div style="font-size: 12px;">
+                                Stripe: ${stripeData.length} • ThunderTix: ${thundertixData.length}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                processData();
+            } else if (stripeData || thundertixData) {
+                // Show waiting state in drop zone
+                dropZone.innerHTML = `
+                    <div style="display: flex; align-items: center; width: 100%;">
+                        <div class="drop-icon">⏳</div>
+                        <div style="flex: 1; text-align: left; font-size: 13px; line-height: 1.5;">
+                            <div style="font-weight: 600; margin-bottom: 4px; color: #333;">Waiting for files...</div>
+                            <div style="font-size: 12px; color: #666;">
+                                ${stripeData ? '✓ Stripe' : '⏳ Stripe'} • ${thundertixData ? '✓ ThunderTix' : '⏳ ThunderTix'}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // ============================================
+        // Data Processing
+        // ============================================
+
+        /**
+         * Processes Stripe data to extract payouts and calculate breakdowns.
+         * Skips the first payout since we don't have transaction data before it.
+         */
+        function processData() {
+            const payouts = stripeData
+                .filter(row => row.Type === 'payout')
+                .sort((a, b) => new Date(a['Created (UTC)']) - new Date(b['Created (UTC)']));
+
+            // Skip first payout - we can only accurately categorize payouts where we have
+            // the full transaction history (i.e., data from the previous payout forward)
+            const validPayouts = payouts.slice(1);
+
+            payoutsData = validPayouts.map((payout, index) => {
+                const previousPayout = payouts[index];
+                return {
+                    payout,
+                    previousPayout,
+                    ...calculatePayoutBreakdown(payout, previousPayout)
+                };
+            });
+
+            populatePayoutSelector();
+        }
+
+        /**
+         * Calculates the breakdown of a single payout by matching Stripe charges
+         * to ThunderTix orders and categorizing the amounts.
+         *
+         * KEY BEHAVIORS:
+         * 1. Uses "Available On" date to group charges into payouts (when funds became available)
+         * 2. Uses "Created" date to match with ThunderTix (when customer paid)
+         * 3. Processes charges WITH emails first to prevent ambiguous matches
+         */
+        function calculatePayoutBreakdown(payout, previousPayout) {
+            const payoutDate = new Date(payout['Created (UTC)']);
+            const previousPayoutDate = new Date(previousPayout['Created (UTC)']);
+
+            // Find charges that belong to this payout based on "Available On" date
+            // A charge is included if its funds became available after the previous payout
+            // and on or before this payout
+            const charges = stripeData.filter(row => {
+                if (row.Type !== 'charge') return false;
+                const availableOn = new Date(row['Available On (UTC)']);
+                return availableOn > previousPayoutDate && availableOn <= payoutDate;
+            });
+
+            // Initialize accumulators
+            let totalTicketSales = 0;
+            let totalSurcharges = 0;
+            let totalStripeFees = 0;
+            let totalDonations = 0;
+            let totalTicketCount = 0;
+            const donationsList = [];
+            const unmatchedCharges = [];
+            const matchedOrderIndices = new Set();
+            const matchedPairs = [];
+
+            // CRITICAL: Process charges in two phases to prioritize email-based matching
+            // WHY: Without this, a charge without an email can "steal" a match from a charge
+            // with an email if they have the same amount and date. Processing email charges
+            // first ensures the most reliable matches happen before ambiguous ones.
+            // Bug fix: Caroline Tsai incident where two $26 charges on same day caused mismatch
+            const chargesWithEmail = charges.filter(c => c['email (metadata)'] && c['email (metadata)'].trim() !== '');
+            const chargesWithoutEmail = charges.filter(c => !c['email (metadata)'] || c['email (metadata)'].trim() === '');
+
+            [...chargesWithEmail, ...chargesWithoutEmail].forEach(charge => {
+                const stripeAmount = parseFloat(charge.Amount) || 0;
+                const stripeFee = parseFloat(charge.Fee) || 0;
+                const orderId = charge['order_id (metadata)'];
+                const email = charge['email (metadata)'];
+                const chargeDate = new Date(charge['Created (UTC)']);
+
+                totalStripeFees += stripeFee;
+
+                // Try to find matching ThunderTix order
+                const ttixOrder = findMatchingOrder(charge, stripeAmount, chargeDate, email, matchedOrderIndices);
+
+                if (ttixOrder.order) {
+                    matchedOrderIndices.add(ttixOrder.index);
+
+                    const orderAmount = parseFloat(ttixOrder.order['Order Amount']) || 0;
+                    const donation = parseFloat(ttixOrder.order['Donation']) || 0;
+                    const fees = parseFloat(ttixOrder.order['Fees']) || 0;
+                    const ticketSales = orderAmount - donation - fees;
+                    const ticketCount = parseInt(ttixOrder.order['Tickets Sold or Reserved']) || 0;
+
+                    matchedPairs.push({
+                        stripeOrderId: orderId,
+                        stripeEmail: email,
+                        stripeAmount: stripeAmount,
+                        stripeDate: chargeDate,
+                        ttixName: `${ttixOrder.order['First Name']} ${ttixOrder.order['Customer Last Name']}`,
+                        ttixEmail: ttixOrder.order['Email'],
+                        ttixAmount: orderAmount,
+                        ttixDate: ttixOrder.order['Order Date'],
+                        ttixTickets: ticketCount,
+                        ttixFees: fees
+                    });
+
+                    totalTicketSales += ticketSales;
+                    totalSurcharges += fees;
+                    totalDonations += donation;
+                    totalTicketCount += ticketCount;
+
+                    if (donation > 0) {
+                        donationsList.push({
+                            amount: donation,
+                            date: ttixOrder.order['Order Date'],
+                            name: `${ttixOrder.order['First Name']} ${ttixOrder.order['Customer Last Name']}`,
+                            email: email || 'N/A'
+                        });
+                    }
+                } else {
+                    // Charge couldn't be matched - collect debug info
+                    unmatchedCharges.push(
+                        createUnmatchedChargeDebugInfo(charge, stripeAmount, email, matchedOrderIndices)
+                    );
+                }
+            });
+
+            // Find data quality issues (tickets ≠ surcharge fees)
+            const dataInconsistencies = matchedPairs
+                .filter(pair => pair.ttixTickets !== pair.ttixFees)
+                .map(pair => ({
+                    name: pair.ttixName,
+                    email: pair.ttixEmail,
+                    date: pair.ttixDate,
+                    orderAmount: pair.ttixAmount,
+                    tickets: pair.ttixTickets,
+                    actualFees: pair.ttixFees,
+                    expectedFees: pair.ttixTickets
+                }));
+
+            const payoutAmount = Math.abs(parseFloat(payout.Amount));
+            const calculatedTotal = totalTicketSales + totalSurcharges + totalDonations - totalStripeFees;
+            const isValid = Math.abs(calculatedTotal - payoutAmount) < (MATCHING.AMOUNT_TOLERANCE_CENTS / 100);
+
+            return {
+                totalTicketSales,
+                totalSurcharges,
+                totalStripeFees,
+                totalDonations,
+                totalTicketCount,
+                donationsList,
+                unmatchedCharges,
+                matchedPairs,
+                dataInconsistencies,
+                payoutAmount,
+                calculatedTotal,
+                isValid,
+                numCharges: charges.length
+            };
+        }
+
+        /**
+         * Attempts to find a ThunderTix order matching a Stripe charge.
+         * Uses three passes: email match, name pattern match, amount+date only.
+         */
+        function findMatchingOrder(charge, stripeAmount, chargeDate, email, matchedOrderIndices) {
+            let ttixOrderIndex = -1;
+            let ttixOrder = null;
+
+            // Pass 1: Email exact match (most reliable)
+            if (email) {
+                ttixOrder = thundertixData.find((order, index) => {
+                    if (!checkAmountAndDate(order, index, stripeAmount, chargeDate, matchedOrderIndices)) {
+                        return false;
+                    }
+                    if (checkEmailMatch(order, email)) {
+                        ttixOrderIndex = index;
+                        return true;
+                    }
+                    return false;
+                });
+            }
+
+            // Pass 2: Email pattern in name (fallback for older data without Email column)
+            if (!ttixOrder && email) {
+                ttixOrder = thundertixData.find((order, index) => {
+                    if (!checkAmountAndDate(order, index, stripeAmount, chargeDate, matchedOrderIndices)) {
+                        return false;
+                    }
+                    if (checkNameMatch(order, email)) {
+                        ttixOrderIndex = index;
+                        return true;
+                    }
+                    return false;
+                });
+            }
+
+            // Pass 3: Amount and date only (least reliable)
+            if (!ttixOrder) {
+                ttixOrder = thundertixData.find((order, index) => {
+                    if (checkAmountAndDate(order, index, stripeAmount, chargeDate, matchedOrderIndices)) {
+                        ttixOrderIndex = index;
+                        return true;
+                    }
+                    return false;
+                });
+            }
+
+            return { order: ttixOrder, index: ttixOrderIndex };
+        }
+
+        /**
+         * Checks if an order matches by amount and date.
+         * Uses calendar dates (not timestamps) to avoid issues with transactions
+         * recorded late at night vs early morning.
+         */
+        function checkAmountAndDate(order, index, stripeAmount, chargeDate, matchedOrderIndices) {
+            if (matchedOrderIndices.has(index)) return false;
+
+            const orderAmount = parseFloat(order['Order Amount']) || 0;
+            const orderDate = new Date(order['Order Date']);
+
+            // Convert to cents to avoid floating point comparison issues
+            const stripeAmountCents = Math.round(stripeAmount * 100);
+            const orderAmountCents = Math.round(orderAmount * 100);
+            const amountMatches = stripeAmountCents === orderAmountCents;
+
+            // CRITICAL: Compare calendar dates, not timestamps
+            // WHY: A ThunderTix order at 11:59 PM and Stripe charge at 12:01 AM
+            // are essentially the same transaction, but timestamp diff would be >1 day
+            // Bug fix: Dec 31 midnight -> Jan 1 4am transaction was failing
+            const stripeDateOnly = new Date(chargeDate.getFullYear(), chargeDate.getMonth(), chargeDate.getDate());
+            const orderDateOnly = new Date(orderDate.getFullYear(), orderDate.getMonth(), orderDate.getDate());
+            const daysDiff = (stripeDateOnly - orderDateOnly) / (1000 * 60 * 60 * 24);
+            const dateMatches = daysDiff >= 0 && daysDiff <= MATCHING.MAX_DATE_DIFF_DAYS;
+
+            return amountMatches && dateMatches;
+        }
+
+        /**
+         * Checks if order email exactly matches charge email.
+         */
+        function checkEmailMatch(order, email) {
+            if (!email || !order['Email']) return false;
+            return email.toLowerCase().trim() === order['Email'].toLowerCase().trim();
+        }
+
+        /**
+         * Checks if order name appears in charge email (fallback matching).
+         */
+        function checkNameMatch(order, email) {
+            if (!email) return false;
+            const emailLower = email.toLowerCase();
+            const lastName = order['Customer Last Name'].toLowerCase();
+            const firstName = order['First Name'].toLowerCase();
+
+            return emailLower.includes(lastName) ||
+                   emailLower.includes(firstName + lastName) ||
+                   emailLower.includes(lastName + firstName);
+        }
+
+        /**
+         * Creates debug information for an unmatched charge.
+         */
+        function createUnmatchedChargeDebugInfo(charge, stripeAmount, email, matchedOrderIndices) {
+            // Find potential matches by amount
+            const potentialMatches = thundertixData.filter(order => {
+                const orderAmount = parseFloat(order['Order Amount']) || 0;
+                const amountCents = Math.round(orderAmount * 100);
+                const stripeCents = Math.round(stripeAmount * 100);
+                return amountCents === stripeCents;
+            }).slice(0, MATCHING.MAX_POTENTIAL_MATCHES);
+
+            // Find orders with matching email
+            const emailMatches = email ? thundertixData.map((order, index) => ({
+                order,
+                index,
+                alreadyMatched: matchedOrderIndices.has(index)
+            })).filter(({order}) => {
+                return order['Email'] &&
+                       order['Email'].toLowerCase().trim() === email.toLowerCase().trim();
+            }) : [];
+
+            return {
+                amount: stripeAmount,
+                orderId: charge['order_id (metadata)'],
+                email,
+                date: charge['Created (UTC)'],
+                availableOn: charge['Available On (UTC)'],
+                potentialMatches,
+                emailMatches
+            };
+        }
+
+        /**
+         * Populates the payout selector dropdown with available payouts.
+         * Displays in reverse chronological order (most recent first).
+         */
+        function populatePayoutSelector() {
+            const select = document.getElementById('payout-select');
+
+            select.disabled = false;
+            select.innerHTML = '<option value="">-- Select a payout --</option>';
+
+            [...payoutsData].reverse().forEach((data, reverseIndex) => {
+                const option = document.createElement('option');
+                const actualIndex = payoutsData.length - 1 - reverseIndex;
+                option.value = actualIndex;
+                const date = new Date(data.payout['Created (UTC)']).toLocaleDateString();
+                const amount = Math.abs(parseFloat(data.payout.Amount)).toFixed(2);
+                option.textContent = `${date} - $${amount} (${data.numCharges} transactions)`;
+                select.appendChild(option);
+            });
+        }
+
+        document.getElementById('payout-select').addEventListener('change', (e) => {
+            const index = parseInt(e.target.value);
+            if (isNaN(index)) {
+                document.getElementById('breakdown-container').innerHTML = '';
+                return;
+            }
+
+            displayBreakdown(payoutsData[index]);
+        });
+
+        // ============================================
+        // Display Breakdown
+        // ============================================
+
+        /**
+         * Renders the breakdown display for a selected payout.
+         * Sections are ordered by importance for the treasurer's workflow.
+         */
+        function displayBreakdown(data) {
+            const container = document.getElementById('breakdown-container');
+
+            const html = `
+                <div class="breakdown">
+                    <h3>Payout Breakdown - ${new Date(data.payout['Created (UTC)']).toLocaleDateString()}</h3>
+
+                    ${renderValidation(data)}
+                    ${renderQuickBooksSection(data)}
+                    ${renderDonorSection(data)}
+                    ${renderDataNotesSection(data)}
+                    ${renderMatchedTransactionsSection(data)}
+                    ${renderUnmatchedChargesSection(data)}
+                </div>
+            `;
+
+            container.innerHTML = html;
+        }
+
+        function renderValidation(data) {
+            return `
+                <div class="validation ${data.isValid ? 'valid' : 'invalid'}">
+                    ${data.isValid ?
+                        '✓ Validation Passed: Calculated total matches payout amount' :
+                        `⚠ Warning: Calculated total ($${data.calculatedTotal.toFixed(2)}) does not match payout ($${data.payoutAmount.toFixed(2)})`
+                    }
+                </div>
+            `;
+        }
+
+        function renderQuickBooksSection(data) {
+            return `
+                <div class="breakdown-section">
+                    <div class="breakdown-section-label">QuickBooks</div>
+                    <p style="font-size: 14px; color: #666; margin-bottom: 16px; margin-top: 0; font-style: italic; line-height: 1.6;">
+                        Find the payout transaction in QuickBooks and split it using these categories and amounts.
+                    </p>
+
+                    <div class="category-line">
+                        <span class="category-name">
+                            ${CATEGORIES.ticketSales}
+                            <span style="font-size: 13px; font-weight: 400; color: #888;">(${data.totalTicketCount} tickets)</span>
+                        </span>
+                        <span class="category-amount">$${data.totalTicketSales.toFixed(2)}</span>
+                    </div>
+
+                    <div class="category-line">
+                        <span class="category-name">${CATEGORIES.surcharges}</span>
+                        <span class="category-amount">$${data.totalSurcharges.toFixed(2)}</span>
+                    </div>
+
+                    <div class="category-line">
+                        <span class="category-name">${CATEGORIES.stripeFees}</span>
+                        <span class="category-amount">-$${data.totalStripeFees.toFixed(2)}</span>
+                    </div>
+
+                    <div class="category-line">
+                        <span class="category-name">${CATEGORIES.donations}</span>
+                        <span class="category-amount">$${data.totalDonations.toFixed(2)}</span>
+                    </div>
+
+                    <div class="category-line total">
+                        <span class="category-name">Total Payout</span>
+                        <span class="category-amount">$${data.payoutAmount.toFixed(2)}</span>
+                    </div>
+
+                    <button class="copy-button" onclick="copyBreakdown(${JSON.stringify(data).replace(/"/g, '&quot;')})">
+                        📋 Copy Memo for QuickBooks
+                    </button>
+                    <div id="copy-notification" class="copy-notification">
+                        ✓ Copied to clipboard!
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDonorSection(data) {
+            if (data.donationsList.length === 0) return '';
+
+            return `
+                <div class="breakdown-section">
+                    <div class="breakdown-section-label">Donor Information</div>
+                    <h4 style="margin-top: 0; margin-bottom: 12px; font-size: 18px; font-weight: 500; color: #1a1a1a;">
+                        Individual Donations (${data.donationsList.length})
+                    </h4>
+                    <p style="font-size: 14px; color: #666; margin-bottom: 12px; font-style: italic;">
+                        Remember to enter these in the
+                        <a href="https://www.concordorchestra-internal.com/Reporting/PatronsDetails_list.php"
+                           target="_blank"
+                           style="color: #5a7a9a; text-decoration: underline;">
+                            Donor Database
+                        </a>.
+                        Click the 🔍 next to each name to search for that donor.
+                    </p>
+                    ${data.donationsList.map(donation => {
+                        const searchUrl = 'https://www.concordorchestra-internal.com/Reporting/PatronsDetails_list.php?qs=' +
+                                         encodeURIComponent(donation.name.toLowerCase()) + '&tab=';
+                        return `
+                            <div class="donation-item">
+                                <div class="donation-amount">$${donation.amount.toFixed(2)}</div>
+                                <div class="donation-details">
+                                    ${donation.name}
+                                    <a href="${searchUrl}" target="_blank" style="margin-left: 8px; color: #5a7a9a; text-decoration: none; font-size: 12px;" title="Search in donor database">
+                                        🔍
+                                    </a>
+                                    <br><small>${donation.email}</small>
+                                </div>
+                                <div class="donation-date">${donation.date}</div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+        }
+
+        function renderDataNotesSection(data) {
+            if (!data.dataInconsistencies || data.dataInconsistencies.length === 0) return '';
+
+            return `
+                <div class="breakdown-section">
+                    <div class="breakdown-section-label">Data Notes</div>
+                    <p style="font-size: 14px; color: #666; margin-bottom: 16px; line-height: 1.6;">
+                        The following orders have a mismatch between the number of tickets and the surcharge amount.
+                        This may indicate exchanges, group discounts, or data entry variations. The amounts have been
+                        correctly categorized based on the actual fees recorded in ThunderTix.
+                    </p>
+                    <div style="max-height: 300px; overflow-y: auto;">
+                        ${data.dataInconsistencies.map(item => `
+                            <div style="padding: 12px; margin: 8px 0; background: #f8fafc; border-radius: 6px; font-size: 14px; border-left: 3px solid #5a7a9a;">
+                                <strong>${item.name}</strong> ${item.email ? `(${item.email})` : '(no email)'}<br>
+                                <span style="color: #666; font-size: 13px;">
+                                    ${item.date} • Order: $${item.orderAmount.toFixed(2)} •
+                                    ${item.tickets} ticket${item.tickets !== 1 ? 's' : ''} •
+                                    Surcharge: $${item.actualFees.toFixed(2)} (expected $${item.expectedFees.toFixed(2)})
+                                </span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderMatchedTransactionsSection(data) {
+            if (!data.matchedPairs || data.matchedPairs.length === 0) return '';
+
+            return `
+                <details style="margin-top: 20px; padding: 15px; background: #f0f0f0; border-radius: 4px;">
+                    <summary style="cursor: pointer; font-weight: bold; margin-bottom: 10px;">
+                        📋 View All Matched Transactions (${data.matchedPairs.length})
+                    </summary>
+                    <div style="max-height: 400px; overflow-y: auto; margin-top: 10px;">
+                        ${data.matchedPairs.map(pair => `
+                            <div style="padding: 8px; margin: 4px 0; background: white; border-radius: 4px; font-size: 12px;">
+                                <strong>Stripe:</strong> ${pair.stripeOrderId} - ${pair.stripeEmail || 'no email'} - $${pair.stripeAmount.toFixed(2)}<br>
+                                <strong>ThunderTix:</strong> ${pair.ttixName} - ${pair.ttixEmail || 'no email'} - $${pair.ttixAmount.toFixed(2)} - ${pair.ttixDate}
+                            </div>
+                        `).join('')}
+                    </div>
+                </details>
+            `;
+        }
+
+        function renderUnmatchedChargesSection(data) {
+            if (data.unmatchedCharges.length === 0) return '';
+
+            return `
+                <div class="validation invalid" style="margin-top: 20px;">
+                    ⚠ ${data.unmatchedCharges.length} charge(s) could not be matched to ThunderTix orders
+                </div>
+                <div class="donations-list">
+                    <h4>Unmatched Stripe Charges (${data.unmatchedCharges.length})</h4>
+                    ${data.unmatchedCharges.map(charge => `
+                        <div class="donation-item" style="border-left-color: #dc3545; flex-direction: column; align-items: flex-start;">
+                            <div style="display: flex; width: 100%; justify-content: space-between; margin-bottom: 8px;">
+                                <div class="donation-amount" style="color: #dc3545;">$${charge.amount.toFixed(2)}</div>
+                                <div class="donation-date">Created: ${new Date(charge.date).toLocaleDateString()}</div>
+                            </div>
+                            <div class="donation-details" style="width: 100%;">
+                                <strong>Order ID:</strong> ${charge.orderId || 'N/A'}<br>
+                                <strong>Email:</strong> ${charge.email || 'No email'}<br>
+                                <strong>Available On:</strong> ${new Date(charge.availableOn).toLocaleDateString()}
+                                ${charge.emailMatches && charge.emailMatches.length > 0 ? `
+                                    <div style="margin-top: 8px; padding: 8px; background: #ffebee; border-radius: 4px; border: 2px solid #f44336;">
+                                        <strong>⚠️ ThunderTix orders with SAME EMAIL:</strong><br>
+                                        ${charge.emailMatches.map(m => {
+                                            const orderAmount = parseFloat(m.order['Order Amount']) || 0;
+                                            const matchStatus = m.alreadyMatched ? ' <span style="color: #f44336; font-weight: bold;">[ALREADY MATCHED]</span>' : '';
+                                            return `• ${m.order['Order Date']} - $${orderAmount.toFixed(2)} - ${m.order['First Name']} ${m.order['Customer Last Name']}${matchStatus}`;
+                                        }).join('<br>')}
+                                    </div>
+                                ` : ''}
+                                ${charge.potentialMatches && charge.potentialMatches.length > 0 ? `
+                                    <div style="margin-top: 8px; padding: 8px; background: #fff3cd; border-radius: 4px;">
+                                        <strong>Possible ThunderTix matches (same amount):</strong><br>
+                                        ${charge.potentialMatches.map(m =>
+                                            `• ${m['Order Date']} - ${m['First Name']} ${m['Customer Last Name']} (${m['Email'] || 'no email'})`
+                                        ).join('<br>')}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // ============================================
+        // Copy to Clipboard (Memo Format)
+        // ============================================
+
+        /**
+         * Copies a formatted memo to clipboard for pasting into QuickBooks.
+         * Format: "X tickets; 0 subscriptions; Y donations - Name1 ($amt), Name2 ($amt)"
+         */
+        function copyBreakdown(data) {
+            const numDonations = data.donationsList.length;
+
+            let text = `${data.totalTicketCount} ticket${data.totalTicketCount !== 1 ? 's' : ''}`;
+            text += `; 0 subscriptions`;
+
+            if (numDonations > 0) {
+                text += `; ${numDonations} donation${numDonations !== 1 ? 's' : ''}`;
+                text += ` - `;
+                const donorList = data.donationsList.map(donation =>
+                    `${donation.name} ($${donation.amount.toFixed(2)})`
+                ).join(', ');
+                text += donorList;
+            } else {
+                text += `; 0 donations`;
+            }
+
+            const notification = document.getElementById('copy-notification');
+            navigator.clipboard.writeText(text).then(() => {
+                notification.classList.add('show');
+                setTimeout(() => {
+                    notification.classList.remove('show');
+                }, 3000);
+            }).catch(err => {
+                notification.textContent = '✗ Failed to copy. Please try again.';
+                notification.style.backgroundColor = '#f44336';
+                notification.classList.add('show');
+                setTimeout(() => {
+                    notification.classList.remove('show');
+                    notification.textContent = '✓ Copied to clipboard!';
+                    notification.style.backgroundColor = '#4CAF50';
+                }, 3000);
+                console.error(err);
+            });
+        }
+
+        window.copyBreakdown = copyBreakdown;
+
+        // ============================================
+        // Modal Functions
+        // ============================================
+
+        function showModal() {
+            document.getElementById('info-modal').classList.add('show');
+        }
+
+        function hideModal(event) {
+            if (!event || event.target.classList.contains('modal')) {
+                document.getElementById('info-modal').classList.remove('show');
+            }
+        }
+
+        window.showModal = showModal;
+        window.hideModal = hideModal;
+    </script>
+</body>
+</html>
