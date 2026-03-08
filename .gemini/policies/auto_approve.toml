@@ -1,0 +1,25 @@
+# Auto-approve file modification tools
+[[rule]]
+toolName = ["write_file", "replace"]
+decision = "allow"
+priority = 100
+
+# Auto-approve ALL shell commands (USE WITH CAUTION - you requested this previously)
+[[rule]]
+toolName = "run_shell_command"
+decision = "allow"
+priority = 50
+
+# Auto-approve all tools from our custom Donor DB MCP Server
+[[rule]]
+mcpName = "concord-orchestra-donor-db"
+toolName = "*"
+decision = "allow"
+priority = 100
+
+# Auto-approve all tools from the QuickBooks MCP Server
+[[rule]]
+mcpName = "quickbooks-online"
+toolName = "*"
+decision = "allow"
+priority = 100

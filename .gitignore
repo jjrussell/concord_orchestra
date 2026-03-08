@@ -1,2 +1,7 @@
 balance_history.csv
 orders_export.csv
+
+# Node & Build
+node_modules/
+dist/
+.env
