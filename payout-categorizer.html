@@ -672,8 +672,8 @@
 
             <h3>Data Notes Section</h3>
             <p>
-                If you see a "Data Notes" section, it shows orders where the number of tickets doesn't
-                match the surcharge amount. This is normal and can happen due to:
+                If you see a "Data Notes" section, it shows orders that couldn't be cleanly divided into 
+                Adult ($25 + surcharge), Group ($20 + surcharge), and Youth (free) tickets. This is normal and can happen due to:
             </p>
             <ul>
                 <li>Exchanges (moving to different seats, no charge)</li>
@@ -967,6 +967,9 @@
             let totalStripeFees = 0;
             let totalDonations = 0;
             let totalTicketCount = 0;
+            let totalAdultTickets = 0;
+            let totalGroupTickets = 0;
+            let totalYouthTickets = 0;
             const donationsList = [];
             const unmatchedCharges = [];
             const matchedOrderIndices = new Set();
@@ -1001,6 +1004,41 @@
                     const ticketSales = orderAmount - donation - fees;
                     const ticketCount = parseInt(ttixOrder.order['Tickets Sold or Reserved']) || 0;
 
+                    let adultCount = 0;
+                    let groupCount = 0;
+                    let youthCount = 0;
+                    let isCleanMath = false;
+
+                    if (ticketCount > 0) {
+                        const paidTickets = fees; // $1 surcharge per paid ticket
+                        youthCount = ticketCount - paidTickets;
+                        
+                        // We need to figure out the split of $25 (Adult) vs $20 (Group) tickets.
+                        // We know:
+                        // 1. Total Sales = (25 * Adult) + (20 * Group)
+                        // 2. Paid Tickets = Adult + Group
+                        //
+                        // If we substitute Group with (Paid Tickets - Adult), we get:
+                        // Total Sales = 25(Adult) + 20(Paid Tickets - Adult)
+                        // Total Sales = 25(Adult) + 20(Paid Tickets) - 20(Adult)
+                        // Total Sales = 5(Adult) + 20(Paid Tickets)
+                        // Total Sales - 20(Paid Tickets) = 5(Adult)
+                        // Adult = (Total Sales - 20(Paid Tickets)) / 5
+                        adultCount = (ticketSales - 20 * paidTickets) / 5;
+                        groupCount = paidTickets - adultCount;
+
+                        if (Number.isInteger(adultCount) && adultCount >= 0 &&
+                            Number.isInteger(groupCount) && groupCount >= 0 &&
+                            Number.isInteger(youthCount) && youthCount >= 0) {
+                            isCleanMath = true;
+                            totalAdultTickets += adultCount;
+                            totalGroupTickets += groupCount;
+                            totalYouthTickets += youthCount;
+                        }
+                    } else if (ticketSales === 0 && fees === 0) {
+                        isCleanMath = true; // Just a donation
+                    }
+
                     matchedPairs.push({
                         stripeOrderId: orderId,
                         stripeEmail: email,
@@ -1011,7 +1049,9 @@
                         ttixAmount: orderAmount,
                         ttixDate: ttixOrder.order['Order Date'],
                         ttixTickets: ticketCount,
-                        ttixFees: fees
+                        ttixFees: fees,
+                        isCleanMath: isCleanMath,
+                        ticketSales: ticketSales
                     });
 
                     totalTicketSales += ticketSales;
@@ -1035,9 +1075,9 @@
                 }
             });
 
-            // Find data quality issues (tickets ≠ surcharge fees)
+            // Find data quality issues (math doesn't cleanly result in Adult/Group/Youth)
             const dataInconsistencies = matchedPairs
-                .filter(pair => pair.ttixTickets !== pair.ttixFees)
+                .filter(pair => !pair.isCleanMath && pair.ttixTickets > 0)
                 .map(pair => ({
                     name: pair.ttixName,
                     email: pair.ttixEmail,
@@ -1045,7 +1085,7 @@
                     orderAmount: pair.ttixAmount,
                     tickets: pair.ttixTickets,
                     actualFees: pair.ttixFees,
-                    expectedFees: pair.ttixTickets
+                    ticketSales: pair.ticketSales
                 }));
 
             const payoutAmount = Math.abs(parseFloat(payout.Amount));
@@ -1058,6 +1098,9 @@
                 totalStripeFees,
                 totalDonations,
                 totalTicketCount,
+                totalAdultTickets,
+                totalGroupTickets,
+                totalYouthTickets,
                 donationsList,
                 unmatchedCharges,
                 matchedPairs,
@@ -1279,12 +1322,18 @@
                         Find the payout transaction in QuickBooks and split it using these categories and amounts.
                     </p>
 
-                    <div class="category-line">
-                        <span class="category-name">
-                            ${CATEGORIES.ticketSales}
-                            <span style="font-size: 13px; font-weight: 400; color: #888;">(${data.totalTicketCount} tickets)</span>
-                        </span>
-                        <span class="category-amount">$${data.totalTicketSales.toFixed(2)}</span>
+                    <div class="category-line" style="flex-direction: column;">
+                        <div style="display: flex; justify-content: space-between;">
+                            <span class="category-name">
+                                ${CATEGORIES.ticketSales}
+                                <span style="font-size: 13px; font-weight: 400; color: #888;">(${data.totalTicketCount} tickets)</span>
+                            </span>
+                            <span class="category-amount">$${data.totalTicketSales.toFixed(2)}</span>
+                        </div>
+                        <div style="font-size: 13px; color: #666; margin-top: 4px; padding-left: 12px; border-left: 2px solid #e0e6ed;">
+                            ${data.totalAdultTickets} Adult, ${data.totalGroupTickets} Group, ${data.totalYouthTickets} Youth
+                            ${data.totalTicketCount - (data.totalAdultTickets + data.totalGroupTickets + data.totalYouthTickets) > 0 ? `, ${data.totalTicketCount - (data.totalAdultTickets + data.totalGroupTickets + data.totalYouthTickets)} Uncategorized` : ''}
+                        </div>
                     </div>
 
                     <div class="category-line">
@@ -1363,18 +1412,17 @@
                 <div class="breakdown-section">
                     <div class="breakdown-section-label">Data Notes</div>
                     <p style="font-size: 14px; color: #666; margin-bottom: 16px; line-height: 1.6;">
-                        The following orders have a mismatch between the number of tickets and the surcharge amount.
-                        This may indicate exchanges, group discounts, or data entry variations. The amounts have been
-                        correctly categorized based on the actual fees recorded in ThunderTix.
+                        The following orders could not be automatically split into Adult/Group/Youth tickets.
+                        This may indicate exchanges, special discounts, or data entry variations.
                     </p>
                     <div style="max-height: 300px; overflow-y: auto;">
                         ${data.dataInconsistencies.map(item => `
                             <div style="padding: 12px; margin: 8px 0; background: #f8fafc; border-radius: 6px; font-size: 14px; border-left: 3px solid #5a7a9a;">
                                 <strong>${item.name}</strong> ${item.email ? `(${item.email})` : '(no email)'}<br>
                                 <span style="color: #666; font-size: 13px;">
-                                    ${item.date} • Order: $${item.orderAmount.toFixed(2)} •
+                                    ${item.date} • Ticket Sales: $${item.ticketSales.toFixed(2)} •
                                     ${item.tickets} ticket${item.tickets !== 1 ? 's' : ''} •
-                                    Surcharge: $${item.actualFees.toFixed(2)} (expected $${item.expectedFees.toFixed(2)})
+                                    Surcharge (Fees): $${item.actualFees.toFixed(2)}
                                 </span>
                             </div>
                         `).join('')}
@@ -1458,7 +1506,10 @@
         function copyBreakdown(data) {
             const numDonations = data.donationsList.length;
 
-            let text = `${data.totalTicketCount} ticket${data.totalTicketCount !== 1 ? 's' : ''}`;
+            let text = `${data.totalTicketCount} tickets (${data.totalAdultTickets} Adult, ${data.totalGroupTickets} Group, ${data.totalYouthTickets} Youth`;
+            const uncategorized = data.totalTicketCount - (data.totalAdultTickets + data.totalGroupTickets + data.totalYouthTickets);
+            if (uncategorized > 0) text += `, ${uncategorized} Uncategorized`;
+            text += `)`;
             text += `; 0 subscriptions`;
 
             if (numDonations > 0) {
