@@ -12,7 +12,7 @@ When asked to process a check, donation, or income, you may receive an image of 
 2.  **Confirm the Transaction Type:** Before proceeding, ask the user to confirm the nature of the income (e.g., Is this a Donation, Government Grant, Ticket Sales, etc.?).
 3.  **Process Donations (Only if confirmed as a donation):**
     *   **Identify the Donor:** Use the `search_donors` MCP tool to find the specific patron by their name.
-    *   **Handle Missing Donors:** If a donor does not exist, use `create_donor` to add them, gathering necessary details like `firstName` and `lastName`.
+    *   **Handle Missing Donors:** If a donor does not exist, use `create_donor` to add them. You **MUST NOT** create a new donor without their full personal information, specifically a complete mailing address. If you do not have their mailing address, ask the user to provide it before creating the profile.
     *   **Check for Duplicates:** Use the `list_donations` MCP tool with the `donorId` to ensure it hasn't already been entered.
     *   **Add the Donation to Donor DB:** Use the `add_donation` MCP tool to log the contribution with the `amount`, `date`, `checkNum`, and any applicable `earmark` or `comments`.
 4.  **Log Deposit in QuickBooks (For ALL income types):**

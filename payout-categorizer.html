@@ -983,6 +983,88 @@
             const chargesWithEmail = charges.filter(c => c['email (metadata)'] && c['email (metadata)'].trim() !== '');
             const chargesWithoutEmail = charges.filter(c => !c['email (metadata)'] || c['email (metadata)'].trim() === '');
 
+            // Global Phase 1: Exact Email Match
+            chargesWithEmail.forEach(charge => {
+                const stripeAmount = parseFloat(charge.Amount) || 0;
+                const chargeDate = new Date(charge['Created (UTC)']);
+                const email = charge['email (metadata)'];
+                
+                const ttixOrderIndex = thundertixData.findIndex((order, index) => 
+                    checkAmountAndDate(order, index, stripeAmount, chargeDate, matchedOrderIndices) &&
+                    checkEmailMatch(order, email)
+                );
+                
+                if (ttixOrderIndex !== -1) {
+                    charge.ttixMatch = { order: thundertixData[ttixOrderIndex], index: ttixOrderIndex };
+                    matchedOrderIndices.add(ttixOrderIndex);
+                }
+            });
+
+            // Global Phase 1.5: Aggregate orders with exact same email if their sum matches
+            chargesWithEmail.forEach(charge => {
+                if (charge.ttixMatch) return;
+                
+                const stripeAmount = parseFloat(charge.Amount) || 0;
+                const email = charge['email (metadata)'];
+                
+                // Find all unmatched orders for this email
+                const unmatchedForEmail = thundertixData
+                    .map((order, index) => ({ order, index }))
+                    .filter(item => !matchedOrderIndices.has(item.index) && checkEmailMatch(item.order, email));
+                
+                if (unmatchedForEmail.length > 1) {
+                    const totalAmount = unmatchedForEmail.reduce((sum, item) => sum + (parseFloat(item.order['Order Amount']) || 0), 0);
+                    
+                    if (Math.round(totalAmount * 100) === Math.round(stripeAmount * 100)) {
+                        // We found a match by aggregating! Create a synthetic order.
+                        const aggregatedOrder = { ...unmatchedForEmail[0].order };
+                        aggregatedOrder['Order Amount'] = totalAmount;
+                        aggregatedOrder['Tickets Sold or Reserved'] = unmatchedForEmail.reduce((sum, item) => sum + (parseInt(item.order['Tickets Sold or Reserved']) || 0), 0);
+                        aggregatedOrder['Fees'] = unmatchedForEmail.reduce((sum, item) => sum + (parseFloat(item.order['Fees']) || 0), 0);
+                        aggregatedOrder['Donation'] = unmatchedForEmail.reduce((sum, item) => sum + (parseFloat(item.order['Donation']) || 0), 0);
+                        
+                        charge.ttixMatch = { order: aggregatedOrder, index: unmatchedForEmail[0].index }; // Use the first index for reporting
+                        unmatchedForEmail.forEach(item => matchedOrderIndices.add(item.index));
+                    }
+                }
+            });
+
+            // Global Phase 2: Name Pattern Match
+            chargesWithEmail.forEach(charge => {
+                if (charge.ttixMatch) return;
+                
+                const stripeAmount = parseFloat(charge.Amount) || 0;
+                const chargeDate = new Date(charge['Created (UTC)']);
+                const email = charge['email (metadata)'];
+                
+                const ttixOrderIndex = thundertixData.findIndex((order, index) => 
+                    checkAmountAndDate(order, index, stripeAmount, chargeDate, matchedOrderIndices) &&
+                    checkNameMatch(order, email)
+                );
+                
+                if (ttixOrderIndex !== -1) {
+                    charge.ttixMatch = { order: thundertixData[ttixOrderIndex], index: ttixOrderIndex };
+                    matchedOrderIndices.add(ttixOrderIndex);
+                }
+            });
+
+            // Global Phase 3: Amount and Date Match
+            [...chargesWithEmail, ...chargesWithoutEmail].forEach(charge => {
+                if (charge.ttixMatch) return;
+                
+                const stripeAmount = parseFloat(charge.Amount) || 0;
+                const chargeDate = new Date(charge['Created (UTC)']);
+                
+                const ttixOrderIndex = thundertixData.findIndex((order, index) => 
+                    checkAmountAndDate(order, index, stripeAmount, chargeDate, matchedOrderIndices)
+                );
+                
+                if (ttixOrderIndex !== -1) {
+                    charge.ttixMatch = { order: thundertixData[ttixOrderIndex], index: ttixOrderIndex };
+                    matchedOrderIndices.add(ttixOrderIndex);
+                }
+            });
+
             [...chargesWithEmail, ...chargesWithoutEmail].forEach(charge => {
                 const stripeAmount = parseFloat(charge.Amount) || 0;
                 const stripeFee = parseFloat(charge.Fee) || 0;
@@ -992,8 +1074,7 @@
 
                 totalStripeFees += stripeFee;
 
-                // Try to find matching ThunderTix order
-                const ttixOrder = findMatchingOrder(charge, stripeAmount, chargeDate, email, matchedOrderIndices);
+                const ttixOrder = charge.ttixMatch || { order: null, index: -1 };
 
                 if (ttixOrder.order) {
                     matchedOrderIndices.add(ttixOrder.index);
@@ -1185,7 +1266,7 @@
             const stripeDateOnly = new Date(chargeDate.getFullYear(), chargeDate.getMonth(), chargeDate.getDate());
             const orderDateOnly = new Date(orderDate.getFullYear(), orderDate.getMonth(), orderDate.getDate());
             const daysDiff = (stripeDateOnly - orderDateOnly) / (1000 * 60 * 60 * 24);
-            const dateMatches = daysDiff >= 0 && daysDiff <= MATCHING.MAX_DATE_DIFF_DAYS;
+            const dateMatches = daysDiff >= -1 && daysDiff <= MATCHING.MAX_DATE_DIFF_DAYS;
 
             return amountMatches && dateMatches;
         }
