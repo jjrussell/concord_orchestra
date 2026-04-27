@@ -44,28 +44,35 @@ const server = new Server(
 let isLoggedIn = false;
 
 async function ensureAuthenticated() {
-  if (isLoggedIn) return;
   try {
-    await client.get("/Reporting/PatronsDetails_list.php");
-    const loginData = new URLSearchParams();
-    loginData.append("username", username!);
-    loginData.append("password", password!);
-    loginData.append("btnSubmit", "Login"); 
+    // Make a test request to see if we are logged in
+    const testRes = await client.get("/Reporting/PatronsDetails_list.php");
+    
+    // If the response URL redirected to login or the page contains the login form, we need to authenticate
+    if (testRes.request?.res?.responseUrl?.includes("login.php") || 
+        (typeof testRes.data === 'string' && testRes.data.includes('name="btnSubmit" value="Login"'))) {
+        
+        console.error("Session expired or not logged in. Re-authenticating...");
+        
+        const loginData = new URLSearchParams();
+        loginData.append("username", username!);
+        loginData.append("password", password!);
+        loginData.append("btnSubmit", "Login"); 
 
-    const postRes = await client.post("/Reporting/login.php", loginData, {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Referer": `${baseUrl}/Reporting/login.php`
-      },
-      maxRedirects: 5 
-    });
+        const postRes = await client.post("/Reporting/login.php", loginData, {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": `${baseUrl}/Reporting/login.php`
+          },
+          maxRedirects: 5 
+        });
 
-    if (postRes.config.url?.includes("login.php")) {
-       if (typeof postRes.data === 'string' && (postRes.data.includes("Invalid Login") || postRes.data.includes("Wrong username"))) {
-           throw new Error("Authentication failed: Invalid credentials");
-       }
+        if (postRes.request?.res?.responseUrl?.includes("login.php")) {
+           if (typeof postRes.data === 'string' && (postRes.data.includes("Invalid Login") || postRes.data.includes("Wrong username"))) {
+               throw new Error("Authentication failed: Invalid credentials");
+           }
+        }
     }
-    isLoggedIn = true;
   } catch (error: any) {
     console.error("Authentication error:", error.message);
     throw error;

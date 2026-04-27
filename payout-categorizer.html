@@ -952,14 +952,17 @@
             const payoutDate = new Date(payout['Created (UTC)']);
             const previousPayoutDate = new Date(previousPayout['Created (UTC)']);
 
-            // Find charges that belong to this payout based on "Available On" date
-            // A charge is included if its funds became available after the previous payout
+            // Find transactions that belong to this payout based on "Available On" date
+            // A transaction is included if its funds became available after the previous payout
             // and on or before this payout
-            const charges = stripeData.filter(row => {
-                if (row.Type !== 'charge') return false;
+            const transactions = stripeData.filter(row => {
+                if (row.Type !== 'charge' && row.Type !== 'refund') return false;
                 const availableOn = new Date(row['Available On (UTC)']);
                 return availableOn > previousPayoutDate && availableOn <= payoutDate;
             });
+
+            const charges = transactions.filter(row => row.Type === 'charge');
+            const refunds = transactions.filter(row => row.Type === 'refund');
 
             // Initialize accumulators
             let totalTicketSales = 0;
@@ -1082,7 +1085,8 @@
                     const orderAmount = parseFloat(ttixOrder.order['Order Amount']) || 0;
                     const donation = parseFloat(ttixOrder.order['Donation']) || 0;
                     const fees = parseFloat(ttixOrder.order['Fees']) || 0;
-                    const ticketSales = orderAmount - donation - fees;
+                    // Use stripeAmount as the ground truth for the total order value
+                    const ticketSales = stripeAmount - donation - fees;
                     const ticketCount = parseInt(ttixOrder.order['Tickets Sold or Reserved']) || 0;
 
                     let adultCount = 0;
@@ -1156,6 +1160,68 @@
                 }
             });
 
+            // Process Refunds
+            let totalRefunds = 0;
+            const processedRefunds = [];
+            refunds.forEach(refund => {
+                const refundAmount = parseFloat(refund.Amount) || 0; // negative
+                const refundFee = parseFloat(refund.Fee) || 0; // usually 0
+
+                totalStripeFees += refundFee;
+                totalRefunds += refundAmount;
+
+                // Find original charge by Source
+                const originalCharge = stripeData.find(r => r.Type === 'charge' && r.Source === refund.Source);
+                
+                let refundTicketSales = 0;
+                let refundSurcharges = 0;
+                let matchedName = 'Unknown';
+                
+                if (originalCharge) {
+                    const email = originalCharge['email (metadata)'];
+                    const chargeAmount = parseFloat(originalCharge.Amount) || 0;
+                    
+                    // Find the ThunderTix order for the original charge
+                    const ttixOrder = thundertixData.find(order => {
+                        if (!checkEmailMatch(order, email)) return false;
+                        const orderAmount = parseFloat(order['Order Amount']) || 0;
+                        const donation = parseFloat(order['Donation']) || 0;
+                        const fees = parseFloat(order['Fees']) || 0;
+                        const sumAmountCents = Math.round((orderAmount + donation + fees) * 100);
+                        const chargeAmountCents = Math.round(chargeAmount * 100);
+                        return chargeAmountCents === Math.round(orderAmount * 100) || chargeAmountCents === sumAmountCents;
+                    });
+
+                    if (ttixOrder) {
+                        matchedName = `${ttixOrder['First Name']} ${ttixOrder['Customer Last Name']}`;
+                        const refundedTickets = Math.abs(parseInt(ttixOrder['Tickets Sold then Refunded']) || 0);
+                        if (refundedTickets > 0) {
+                            // Surcharge is $1 per ticket. If refund amount is negative:
+                            refundSurcharges = -(refundedTickets * 1);
+                            refundTicketSales = refundAmount - refundSurcharges; 
+                        } else {
+                            // If no tickets recorded as refunded, assume it was all ticket sales
+                            refundTicketSales = refundAmount;
+                        }
+                    } else {
+                        refundTicketSales = refundAmount;
+                    }
+                } else {
+                    refundTicketSales = refundAmount;
+                }
+
+                totalTicketSales += refundTicketSales;
+                totalSurcharges += refundSurcharges;
+                
+                processedRefunds.push({
+                    amount: refundAmount,
+                    date: new Date(refund['Created (UTC)']).toLocaleDateString(),
+                    ticketSales: refundTicketSales,
+                    surcharges: refundSurcharges,
+                    name: matchedName
+                });
+            });
+
             // Find data quality issues (math doesn't cleanly result in Adult/Group/Youth)
             const dataInconsistencies = matchedPairs
                 .filter(pair => !pair.isCleanMath && pair.ttixTickets > 0)
@@ -1189,7 +1255,9 @@
                 payoutAmount,
                 calculatedTotal,
                 isValid,
-                numCharges: charges.length
+                numCharges: charges.length,
+                totalRefunds,
+                processedRefunds
             };
         }
 
@@ -1252,12 +1320,38 @@
             if (matchedOrderIndices.has(index)) return false;
 
             const orderAmount = parseFloat(order['Order Amount']) || 0;
-            const orderDate = new Date(order['Order Date']);
-
-            // Convert to cents to avoid floating point comparison issues
+            const refundedTickets = Math.abs(parseInt(order['Tickets Sold then Refunded']) || 0);
+            
+            // Reconstruct Gross Amount if tickets were refunded
+            // If tickets were refunded, the 'Order Amount' is the Net amount.
+            // We need to match against the Gross Stripe charge.
+            // A returned ticket is typically $25. It might or might not include a $1 fee refund.
+            // So we allow matching if the Stripe amount equals Order Amount + ($25 or $26 * refundedTickets)
+            
             const stripeAmountCents = Math.round(stripeAmount * 100);
             const orderAmountCents = Math.round(orderAmount * 100);
-            const amountMatches = stripeAmountCents === orderAmountCents;
+            
+            let amountMatches = false;
+            
+            if (stripeAmountCents === orderAmountCents) {
+                amountMatches = true;
+            } else if (refundedTickets > 0) {
+                // Check possible gross amounts (with or without fee refunds, and Adult vs Group prices)
+                const possibleGrossAmounts = [
+                    orderAmountCents + (refundedTickets * 2500),       // Adult tickets, fees not refunded
+                    orderAmountCents + (refundedTickets * 2600),       // Adult tickets, fees refunded
+                    orderAmountCents + (refundedTickets * 2000),       // Group tickets, fees not refunded
+                    orderAmountCents + (refundedTickets * 2100)        // Group tickets, fees refunded
+                ];
+                
+                if (possibleGrossAmounts.includes(stripeAmountCents)) {
+                    amountMatches = true;
+                }
+            }
+
+            if (!amountMatches) return false;
+
+            const orderDate = new Date(order['Order Date']);
 
             // CRITICAL: Compare calendar dates, not timestamps
             // WHY: A ThunderTix order at 11:59 PM and Stripe charge at 12:01 AM
@@ -1376,12 +1470,38 @@
                     ${renderQuickBooksSection(data)}
                     ${renderDonorSection(data)}
                     ${renderDataNotesSection(data)}
+                    ${renderRefundsSection(data)}
                     ${renderMatchedTransactionsSection(data)}
                     ${renderUnmatchedChargesSection(data)}
                 </div>
             `;
 
             container.innerHTML = html;
+        }
+
+        function renderRefundsSection(data) {
+            if (!data.processedRefunds || data.processedRefunds.length === 0) return '';
+
+            return `
+                <div class="breakdown-section" style="border-color: #ffcdd2; background-color: #fffafb;">
+                    <div class="breakdown-section-label" style="color: #c62828;">Refunds Processed</div>
+                    <p style="font-size: 14px; color: #666; margin-bottom: 16px; line-height: 1.6;">
+                        The following refunds were included in this payout and have automatically reduced the Ticket Sales and Surcharges above.
+                    </p>
+                    <div style="max-height: 300px; overflow-y: auto;">
+                        ${data.processedRefunds.map(refund => `
+                            <div style="padding: 12px; margin: 8px 0; background: white; border-radius: 6px; font-size: 14px; border-left: 3px solid #c62828; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                                <strong>${refund.name}</strong><br>
+                                <span style="color: #666; font-size: 13px;">
+                                    ${refund.date} • Total Refund: <span style="color: #c62828;">$${refund.amount.toFixed(2)}</span><br>
+                                    Reduced Ticket Sales: $${refund.ticketSales.toFixed(2)} •
+                                    Reduced Surcharges: $${refund.surcharges.toFixed(2)}
+                                </span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
         }
 
         function renderValidation(data) {
@@ -1453,9 +1573,17 @@
             return `
                 <div class="breakdown-section">
                     <div class="breakdown-section-label">Donor Information</div>
-                    <h4 style="margin-top: 0; margin-bottom: 12px; font-size: 18px; font-weight: 500; color: #1a1a1a;">
-                        Individual Donations (${data.donationsList.length})
-                    </h4>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <h4 style="margin: 0; font-size: 18px; font-weight: 500; color: #1a1a1a;">
+                            Individual Donations (${data.donationsList.length})
+                        </h4>
+                        <button class="copy-button" style="padding: 8px 16px; font-size: 14px; margin-top: 0;" onclick="copyDonations(${JSON.stringify(data).replace(/"/g, '&quot;')})">
+                            🤖 Copy for AI
+                        </button>
+                    </div>
+                    <div id="copy-donations-notification" class="copy-notification" style="margin-bottom: 16px;">
+                        ✓ Copied donations to clipboard!
+                    </div>
                     <p style="font-size: 14px; color: #666; margin-bottom: 12px; font-style: italic;">
                         Remember to enter these in the
                         <a href="https://www.concordorchestra-internal.com/Reporting/PatronsDetails_list.php"
@@ -1624,6 +1752,41 @@
         }
 
         window.copyBreakdown = copyBreakdown;
+
+        /**
+         * Copies a formatted list of donations for AI ingestion.
+         */
+        function copyDonations(data) {
+            let text = "Please process the following online donations from Stripe/Thundertix:\n\n";
+            data.donationsList.forEach(d => {
+                text += `Name: ${d.name}\n`;
+                text += `Email: ${d.email}\n`;
+                text += `Date: ${d.date}\n`;
+                text += `Amount: $${d.amount.toFixed(2)}\n`;
+                text += `Type: Individual Contribution\n`;
+                text += `Payment Method: Online\n`;
+                text += `---\n`;
+            });
+
+            const notification = document.getElementById('copy-donations-notification');
+            navigator.clipboard.writeText(text).then(() => {
+                notification.classList.add('show');
+                setTimeout(() => {
+                    notification.classList.remove('show');
+                }, 3000);
+            }).catch(err => {
+                notification.textContent = '✗ Failed to copy.';
+                notification.style.backgroundColor = '#f44336';
+                notification.classList.add('show');
+                setTimeout(() => {
+                    notification.classList.remove('show');
+                    notification.textContent = '✓ Copied donations to clipboard!';
+                    notification.style.backgroundColor = '#4CAF50';
+                }, 3000);
+                console.error(err);
+            });
+        }
+        window.copyDonations = copyDonations;
 
         // ============================================
         // Modal Functions
