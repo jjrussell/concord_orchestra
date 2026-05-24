@@ -4,11 +4,6 @@
       "command": "npm",
       "args": ["--prefix", "mcp-donor-db", "start"],
       "trust": true
-    },
-    "quickbooks-online": {
-      "command": "npm",
-      "args": ["--prefix", "quickbooks-online-mcp-server", "start"],
-      "trust": true
     }
   }
 }
