@@ -631,6 +631,7 @@
                         <li><strong>Online Ticket Surcharge</strong></li>
                         <li><strong>Online Transaction Fees:Stripe</strong> (negative amount)</li>
                         <li><strong>Contributions:Individual</strong></li>
+                        <li><strong>Young Artist Competition</strong> (if applicable)</li>
                     </ul>
                 </li>
                 <li>Click "Copy Memo" and paste into the QuickBooks transaction memo field for record-keeping</li>
@@ -715,9 +716,11 @@
         // QuickBooks category names - update these if categories change
         const CATEGORIES = {
             ticketSales: "Ticket Sales",
+            subscriptions: "Subscriptions",
             surcharges: "Online Ticket Surcharge",
             stripeFees: "Online Transaction Fees:Stripe",
-            donations: "Contributions:Individual"
+            donations: "Contributions:Individual",
+            yacFees: "Young Artist Competition"
         };
 
         // Matching tolerances - tuned based on real-world data
@@ -956,13 +959,14 @@
             // A transaction is included if its funds became available after the previous payout
             // and on or before this payout
             const transactions = stripeData.filter(row => {
-                if (row.Type !== 'charge' && row.Type !== 'refund') return false;
+                if (row.Type !== 'charge' && row.Type !== 'refund' && row.Type !== 'stripe_fee') return false;
                 const availableOn = new Date(row['Available On (UTC)']);
                 return availableOn > previousPayoutDate && availableOn <= payoutDate;
             });
 
             const charges = transactions.filter(row => row.Type === 'charge');
             const refunds = transactions.filter(row => row.Type === 'refund');
+            const miscStripeFees = transactions.filter(row => row.Type === 'stripe_fee');
 
             // Initialize accumulators
             let totalTicketSales = 0;
@@ -973,18 +977,42 @@
             let totalAdultTickets = 0;
             let totalGroupTickets = 0;
             let totalYouthTickets = 0;
+            let totalSubscriptionSales = 0;
+            let totalSubscriptions = 0;
+            let totalYACFees = 0;
             const donationsList = [];
             const unmatchedCharges = [];
             const matchedOrderIndices = new Set();
             const matchedPairs = [];
+
+            // Add miscellaneous stripe_fee items to totalStripeFees
+            miscStripeFees.forEach(row => {
+                const feeAmount = parseFloat(row.Amount) || 0;
+                totalStripeFees += Math.abs(feeAmount);
+            });
+
+            // Extract YAC (Young Artist Competition) charges to handle them directly
+            const yacCharges = charges.filter(c => 
+                (c.Description && c.Description.includes('Young Artist Competition')) ||
+                (c['description (metadata)'] && c['description (metadata)'].includes('Young Artist Competition'))
+            );
+            
+            const regularCharges = charges.filter(c => !yacCharges.includes(c));
+
+            yacCharges.forEach(charge => {
+                const stripeAmount = parseFloat(charge.Amount) || 0;
+                const stripeFee = parseFloat(charge.Fee) || 0;
+                totalYACFees += stripeAmount;
+                totalStripeFees += stripeFee;
+            });
 
             // CRITICAL: Process charges in two phases to prioritize email-based matching
             // WHY: Without this, a charge without an email can "steal" a match from a charge
             // with an email if they have the same amount and date. Processing email charges
             // first ensures the most reliable matches happen before ambiguous ones.
             // Bug fix: Caroline Tsai incident where two $26 charges on same day caused mismatch
-            const chargesWithEmail = charges.filter(c => c['email (metadata)'] && c['email (metadata)'].trim() !== '');
-            const chargesWithoutEmail = charges.filter(c => !c['email (metadata)'] || c['email (metadata)'].trim() === '');
+            const chargesWithEmail = regularCharges.filter(c => c['email (metadata)'] && c['email (metadata)'].trim() !== '');
+            const chargesWithoutEmail = regularCharges.filter(c => !c['email (metadata)'] || c['email (metadata)'].trim() === '');
 
             // Global Phase 1: Exact Email Match
             chargesWithEmail.forEach(charge => {
@@ -1094,34 +1122,52 @@
                     let youthCount = 0;
                     let isCleanMath = false;
 
-                    if (ticketCount > 0) {
-                        const paidTickets = fees; // $1 surcharge per paid ticket
-                        youthCount = ticketCount - paidTickets;
-                        
-                        // We need to figure out the split of $25 (Adult) vs $20 (Group) tickets.
-                        // We know:
-                        // 1. Total Sales = (25 * Adult) + (20 * Group)
-                        // 2. Paid Tickets = Adult + Group
-                        //
-                        // If we substitute Group with (Paid Tickets - Adult), we get:
-                        // Total Sales = 25(Adult) + 20(Paid Tickets - Adult)
-                        // Total Sales = 25(Adult) + 20(Paid Tickets) - 20(Adult)
-                        // Total Sales = 5(Adult) + 20(Paid Tickets)
-                        // Total Sales - 20(Paid Tickets) = 5(Adult)
-                        // Adult = (Total Sales - 20(Paid Tickets)) / 5
-                        adultCount = (ticketSales - 20 * paidTickets) / 5;
-                        groupCount = paidTickets - adultCount;
+                    // Check if this is a season pass (subscription) purchase
+                    const isSeasonTicket = (charge.Description && charge.Description.toLowerCase().includes('season')) ||
+                                           (ticketSales > 0 && ticketSales % 100 === 0 && fees === ticketSales / 100 && ticketCount === 5 * fees);
 
-                        if (Number.isInteger(adultCount) && adultCount >= 0 &&
-                            Number.isInteger(groupCount) && groupCount >= 0 &&
-                            Number.isInteger(youthCount) && youthCount >= 0) {
-                            isCleanMath = true;
-                            totalAdultTickets += adultCount;
-                            totalGroupTickets += groupCount;
-                            totalYouthTickets += youthCount;
+                    if (isSeasonTicket) {
+                        isCleanMath = true;
+                        const subCount = ticketSales / 100;
+                        totalSubscriptions += subCount;
+                        totalSubscriptionSales += ticketSales;
+                        totalSurcharges += fees;
+                        totalDonations += donation;
+                    } else {
+                        if (ticketCount > 0) {
+                            const paidTickets = fees; // $1 surcharge per paid ticket
+                            youthCount = ticketCount - paidTickets;
+                            
+                            // We need to figure out the split of $25 (Adult) vs $20 (Group) tickets.
+                            // We know:
+                            // 1. Total Sales = (25 * Adult) + (20 * Group)
+                            // 2. Paid Tickets = Adult + Group
+                            //
+                            // If we substitute Group with (Paid Tickets - Adult), we get:
+                            // Total Sales = 25(Adult) + 20(Paid Tickets - Adult)
+                            // Total Sales = 25(Adult) + 20(Paid Tickets) - 20(Adult)
+                            // Total Sales = 5(Adult) + 20(Paid Tickets)
+                            // Total Sales - 20(Paid Tickets) = 5(Adult)
+                            // Adult = (Total Sales - 20(Paid Tickets)) / 5
+                            adultCount = (ticketSales - 20 * paidTickets) / 5;
+                            groupCount = paidTickets - adultCount;
+
+                            if (Number.isInteger(adultCount) && adultCount >= 0 &&
+                                Number.isInteger(groupCount) && groupCount >= 0 &&
+                                Number.isInteger(youthCount) && youthCount >= 0) {
+                                isCleanMath = true;
+                                totalAdultTickets += adultCount;
+                                totalGroupTickets += groupCount;
+                                totalYouthTickets += youthCount;
+                            }
+                        } else if (ticketSales === 0 && fees === 0) {
+                            isCleanMath = true; // Just a donation
                         }
-                    } else if (ticketSales === 0 && fees === 0) {
-                        isCleanMath = true; // Just a donation
+
+                        totalTicketSales += ticketSales;
+                        totalSurcharges += fees;
+                        totalDonations += donation;
+                        totalTicketCount += ticketCount;
                     }
 
                     matchedPairs.push({
@@ -1138,11 +1184,6 @@
                         isCleanMath: isCleanMath,
                         ticketSales: ticketSales
                     });
-
-                    totalTicketSales += ticketSales;
-                    totalSurcharges += fees;
-                    totalDonations += donation;
-                    totalTicketCount += ticketCount;
 
                     if (donation > 0) {
                         donationsList.push({
@@ -1236,11 +1277,12 @@
                 }));
 
             const payoutAmount = Math.abs(parseFloat(payout.Amount));
-            const calculatedTotal = totalTicketSales + totalSurcharges + totalDonations - totalStripeFees;
+            const calculatedTotal = totalTicketSales + totalSubscriptionSales + totalSurcharges + totalDonations + totalYACFees - totalStripeFees;
             const isValid = Math.abs(calculatedTotal - payoutAmount) < (MATCHING.AMOUNT_TOLERANCE_CENTS / 100);
 
             return {
                 totalTicketSales,
+                totalSubscriptionSales,
                 totalSurcharges,
                 totalStripeFees,
                 totalDonations,
@@ -1248,6 +1290,8 @@
                 totalAdultTickets,
                 totalGroupTickets,
                 totalYouthTickets,
+                totalSubscriptions,
+                totalYACFees,
                 donationsList,
                 unmatchedCharges,
                 matchedPairs,
@@ -1537,6 +1581,16 @@
                         </div>
                     </div>
 
+                    ${data.totalSubscriptions > 0 ? `
+                    <div class="category-line">
+                        <span class="category-name">
+                            ${CATEGORIES.subscriptions}
+                            <span style="font-size: 13px; font-weight: 400; color: #888;">(${data.totalSubscriptions} subscriptions)</span>
+                        </span>
+                        <span class="category-amount">$${data.totalSubscriptionSales.toFixed(2)}</span>
+                    </div>
+                    ` : ''}
+
                     <div class="category-line">
                         <span class="category-name">${CATEGORIES.surcharges}</span>
                         <span class="category-amount">$${data.totalSurcharges.toFixed(2)}</span>
@@ -1551,6 +1605,13 @@
                         <span class="category-name">${CATEGORIES.donations}</span>
                         <span class="category-amount">$${data.totalDonations.toFixed(2)}</span>
                     </div>
+
+                    ${data.totalYACFees > 0 ? `
+                    <div class="category-line">
+                        <span class="category-name">${CATEGORIES.yacFees}</span>
+                        <span class="category-amount">$${data.totalYACFees.toFixed(2)}</span>
+                    </div>
+                    ` : ''}
 
                     <div class="category-line total">
                         <span class="category-name">Total Payout</span>
@@ -1710,7 +1771,7 @@
 
         /**
          * Copies a formatted memo to clipboard for pasting into QuickBooks.
-         * Format: "X tickets; 0 subscriptions; Y donations - Name1 ($amt), Name2 ($amt)"
+         * Format: "X tickets; S subscriptions; Y donations - Name1 ($amt), Name2 ($amt)"
          */
         function copyBreakdown(data) {
             const numDonations = data.donationsList.length;
@@ -1719,7 +1780,7 @@
             const uncategorized = data.totalTicketCount - (data.totalAdultTickets + data.totalGroupTickets + data.totalYouthTickets);
             if (uncategorized > 0) text += `, ${uncategorized} Uncategorized`;
             text += `)`;
-            text += `; 0 subscriptions`;
+            text += `; ${data.totalSubscriptions || 0} subscriptions`;
 
             if (numDonations > 0) {
                 text += `; ${numDonations} donation${numDonations !== 1 ? 's' : ''}`;
@@ -1730,6 +1791,10 @@
                 text += donorList;
             } else {
                 text += `; 0 donations`;
+            }
+
+            if (data.totalYACFees > 0) {
+                text += `; YAC Fees ($${data.totalYACFees.toFixed(2)})`;
             }
 
             const notification = document.getElementById('copy-notification');
