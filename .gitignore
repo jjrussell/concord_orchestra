@@ -8,3 +8,5 @@ dist/
 
 # Gemini Policies
 .gemini/policies/auto_approve.toml
+
+.omo/

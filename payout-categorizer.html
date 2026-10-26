@@ -980,6 +980,7 @@
             let totalSubscriptionSales = 0;
             let totalSubscriptions = 0;
             let totalYACFees = 0;
+            let totalYACCount = 0;
             const donationsList = [];
             const unmatchedCharges = [];
             const matchedOrderIndices = new Set();
@@ -991,28 +992,13 @@
                 totalStripeFees += Math.abs(feeAmount);
             });
 
-            // Extract YAC (Young Artist Competition) charges to handle them directly
-            const yacCharges = charges.filter(c => 
-                (c.Description && c.Description.includes('Young Artist Competition')) ||
-                (c['description (metadata)'] && c['description (metadata)'].includes('Young Artist Competition'))
-            );
-            
-            const regularCharges = charges.filter(c => !yacCharges.includes(c));
-
-            yacCharges.forEach(charge => {
-                const stripeAmount = parseFloat(charge.Amount) || 0;
-                const stripeFee = parseFloat(charge.Fee) || 0;
-                totalYACFees += stripeAmount;
-                totalStripeFees += stripeFee;
-            });
-
             // CRITICAL: Process charges in two phases to prioritize email-based matching
             // WHY: Without this, a charge without an email can "steal" a match from a charge
             // with an email if they have the same amount and date. Processing email charges
             // first ensures the most reliable matches happen before ambiguous ones.
             // Bug fix: Caroline Tsai incident where two $26 charges on same day caused mismatch
-            const chargesWithEmail = regularCharges.filter(c => c['email (metadata)'] && c['email (metadata)'].trim() !== '');
-            const chargesWithoutEmail = regularCharges.filter(c => !c['email (metadata)'] || c['email (metadata)'].trim() === '');
+            const chargesWithEmail = charges.filter(c => c['email (metadata)'] && c['email (metadata)'].trim() !== '');
+            const chargesWithoutEmail = charges.filter(c => !c['email (metadata)'] || c['email (metadata)'].trim() === '');
 
             // Global Phase 1: Exact Email Match
             chargesWithEmail.forEach(charge => {
@@ -1122,11 +1108,24 @@
                     let youthCount = 0;
                     let isCleanMath = false;
 
+                    // Check if this is a youth concerto competition entry
+                    // ($40 per entry, no surcharges; or matching competition description)
+                    const isYAC = (charge.Description && (charge.Description.toLowerCase().includes('young artist') || charge.Description.toLowerCase().includes('youth concerto') || charge.Description.toLowerCase().includes('competition'))) ||
+                                  (charge['description (metadata)'] && (charge['description (metadata)'].toLowerCase().includes('young artist') || charge['description (metadata)'].toLowerCase().includes('youth concerto') || charge['description (metadata)'].toLowerCase().includes('competition'))) ||
+                                  (ticketSales > 0 && ticketSales % 40 === 0 && fees === 0);
+
                     // Check if this is a season pass (subscription) purchase
                     const isSeasonTicket = (charge.Description && charge.Description.toLowerCase().includes('season')) ||
                                            (ticketSales > 0 && ticketSales % 100 === 0 && fees === ticketSales / 100 && ticketCount === 5 * fees);
 
-                    if (isSeasonTicket) {
+                    if (isYAC) {
+                        isCleanMath = true;
+                        const entryCount = ticketSales / 40;
+                        totalYACCount += entryCount;
+                        totalYACFees += ticketSales;
+                        totalSurcharges += fees;
+                        totalDonations += donation;
+                    } else if (isSeasonTicket) {
                         isCleanMath = true;
                         const subCount = ticketSales / 100;
                         totalSubscriptions += subCount;
@@ -1194,10 +1193,21 @@
                         });
                     }
                 } else {
-                    // Charge couldn't be matched - collect debug info
-                    unmatchedCharges.push(
-                        createUnmatchedChargeDebugInfo(charge, stripeAmount, email, matchedOrderIndices)
-                    );
+                    // Check if this unmatched charge is a youth concerto competition entry
+                    const isUnmatchedYAC = (charge.Description && (charge.Description.toLowerCase().includes('young artist') || charge.Description.toLowerCase().includes('youth concerto') || charge.Description.toLowerCase().includes('competition'))) ||
+                                           (charge['description (metadata)'] && (charge['description (metadata)'].toLowerCase().includes('young artist') || charge['description (metadata)'].toLowerCase().includes('youth concerto') || charge['description (metadata)'].toLowerCase().includes('competition'))) ||
+                                           (stripeAmount > 0 && stripeAmount % 40 === 0);
+
+                    if (isUnmatchedYAC) {
+                        const entryCount = stripeAmount / 40;
+                        totalYACCount += entryCount;
+                        totalYACFees += stripeAmount;
+                    } else {
+                        // Charge couldn't be matched - collect debug info
+                        unmatchedCharges.push(
+                            createUnmatchedChargeDebugInfo(charge, stripeAmount, email, matchedOrderIndices)
+                        );
+                    }
                 }
             });
 
@@ -1216,9 +1226,19 @@
                 
                 let refundTicketSales = 0;
                 let refundSurcharges = 0;
+                let refundYACFees = 0;
                 let matchedName = 'Unknown';
                 
-                if (originalCharge) {
+                const isYACRefund = (originalCharge && (
+                    (originalCharge.Description && (originalCharge.Description.toLowerCase().includes('young artist') || originalCharge.Description.toLowerCase().includes('youth concerto') || originalCharge.Description.toLowerCase().includes('competition'))) ||
+                    (originalCharge['description (metadata)'] && (originalCharge['description (metadata)'].toLowerCase().includes('young artist') || originalCharge['description (metadata)'].toLowerCase().includes('youth concerto') || originalCharge['description (metadata)'].toLowerCase().includes('competition'))) ||
+                    (Math.abs(parseFloat(originalCharge.Amount) || 0) % 40 === 0)
+                )) || (Math.abs(refundAmount) % 40 === 0);
+
+                if (isYACRefund) {
+                    refundYACFees = refundAmount;
+                    totalYACFees += refundYACFees;
+                } else if (originalCharge) {
                     const email = originalCharge['email (metadata)'];
                     const chargeAmount = parseFloat(originalCharge.Amount) || 0;
                     
@@ -1247,18 +1267,20 @@
                     } else {
                         refundTicketSales = refundAmount;
                     }
+                    totalTicketSales += refundTicketSales;
+                    totalSurcharges += refundSurcharges;
                 } else {
                     refundTicketSales = refundAmount;
+                    totalTicketSales += refundTicketSales;
+                    totalSurcharges += refundSurcharges;
                 }
-
-                totalTicketSales += refundTicketSales;
-                totalSurcharges += refundSurcharges;
                 
                 processedRefunds.push({
                     amount: refundAmount,
                     date: new Date(refund['Created (UTC)']).toLocaleDateString(),
                     ticketSales: refundTicketSales,
                     surcharges: refundSurcharges,
+                    yacFees: refundYACFees,
                     name: matchedName
                 });
             });
@@ -1292,6 +1314,7 @@
                 totalYouthTickets,
                 totalSubscriptions,
                 totalYACFees,
+                totalYACCount,
                 donationsList,
                 unmatchedCharges,
                 matchedPairs,
@@ -1538,8 +1561,7 @@
                                 <strong>${refund.name}</strong><br>
                                 <span style="color: #666; font-size: 13px;">
                                     ${refund.date} • Total Refund: <span style="color: #c62828;">$${refund.amount.toFixed(2)}</span><br>
-                                    Reduced Ticket Sales: $${refund.ticketSales.toFixed(2)} •
-                                    Reduced Surcharges: $${refund.surcharges.toFixed(2)}
+                                    ${refund.yacFees ? `Reduced YAC Fees: $${Math.abs(refund.yacFees).toFixed(2)}` : `Reduced Ticket Sales: $${refund.ticketSales.toFixed(2)} • Reduced Surcharges: $${refund.surcharges.toFixed(2)}`}
                                 </span>
                             </div>
                         `).join('')}
@@ -1608,7 +1630,10 @@
 
                     ${data.totalYACFees > 0 ? `
                     <div class="category-line">
-                        <span class="category-name">${CATEGORIES.yacFees}</span>
+                        <span class="category-name">
+                            ${CATEGORIES.yacFees}
+                            ${data.totalYACCount > 0 ? `<span style="font-size: 13px; font-weight: 400; color: #888;">(${data.totalYACCount} ${data.totalYACCount === 1 ? 'entry' : 'entries'})</span>` : ''}
+                        </span>
                         <span class="category-amount">$${data.totalYACFees.toFixed(2)}</span>
                     </div>
                     ` : ''}
