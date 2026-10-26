@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "concord-orchestra-donor-db": {
+        "type": "local",
+        "command": ["npm", "--prefix", "mcp-donor-db", "start"]
+      }
+    }
+  },
+  "skills": [
+    ".gemini/skills"
+  ]
+}
